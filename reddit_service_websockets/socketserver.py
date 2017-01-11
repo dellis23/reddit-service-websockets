@@ -61,7 +61,31 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
             return ["Forbidden"]
 
         self.environ["signature_validated"] = True
+
+        # Check if compression is supported.  The RFC explanation for the
+        # variations on what is accepted here is convoluted, so we'll just
+        # stick with the happy case, ignoring arguments to the :
+        #
+        #    https://tools.ietf.org/html/rfc6455#page-48
+        #
+        # Worst case scenario, we fall back to not compressing.
+        extensions = self.environ.get('HTTP_SEC_WEBSOCKET_EXTENSIONS')
+        extensions = {extension.split(";")[0].strip()
+                      for extension in extensions.split(",")}
+        self.environ["supports_compression"] = \
+            "permessage-deflate" in extensions
+
         return super(WebSocketHandler, self).upgrade_connection()
+
+    def start_response(self, status, headers, exc_info=None):
+        # Ideally, this would probably go in `upgrade_connection`, but we have
+        # no way to modify the headers there without duplicating the logic of
+        # the entire method.  This is a much smaller, cleaner entry point.
+        # Ideally, geventwebsocket would just support this stuff.
+        if self.environ["supports_compression"]:
+            headers.append(("Sec-WebSocket-Extensions", "permessage-deflate"))
+        return super(WebSocketHandler, self).start_response(
+            status, headers, exc_info=exc_info)
 
 
 class SocketServer(object):
