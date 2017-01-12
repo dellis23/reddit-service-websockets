@@ -1,11 +1,18 @@
 import logging
 import urlparse
+from zlib import (
+    compressobj,
+    DEFLATED,
+    MAX_WBITS,
+)
 
 import gevent
 import geventwebsocket
 import geventwebsocket.handler
 
 from baseplate.crypto import MessageSigner, SignatureError
+
+from .patched_websocket import send as websocket_send
 
 
 LOG = logging.getLogger(__name__)
@@ -110,12 +117,24 @@ class SocketServer(object):
             start_response("400 Bad Request", [])
             return ["you are not a websocket"]
 
+        # Setup compression
+        if environ["supports_compression"]:
+            # See http://www.zlib.net/manual.html#Advanced for details:
+            #
+            #     "windowBits can also be -8..-15 for raw deflate"
+            #
+            # Also see http://stackoverflow.com/a/22311297/720638
+            compressor = compressobj(7, DEFLATED, -MAX_WBITS)
+        else:
+            compressor = None
+
         # ensure the application was properly configured to use the custom
         # handler subclass which validates namespace signatures
         assert environ["signature_validated"]
 
         namespace = environ["PATH_INFO"]
-        dispatcher = gevent.spawn(self._pump_dispatcher, namespace, websocket)
+        dispatcher = gevent.spawn(
+            self._pump_dispatcher, namespace, websocket, compressor)
 
         try:
             self.metrics.counter("conn.connected").increment()
@@ -135,9 +154,10 @@ class SocketServer(object):
         if self.status_publisher:
             self.status_publisher("websocket.%s" % key, value)
 
-    def _pump_dispatcher(self, namespace, websocket):
-        for msg in self.dispatcher.listen(namespace, max_timeout=self.ping_interval):
+    def _pump_dispatcher(self, namespace, websocket, compressor=None):
+        for msg in self.dispatcher.listen(
+                namespace, max_timeout=self.ping_interval):
             if msg is not None:
-                websocket.send(msg)
+                websocket_send(websocket, msg, compressor=compressor)
             else:
                 websocket.send_frame("", websocket.OPCODE_PING)
