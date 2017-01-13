@@ -4,7 +4,7 @@ since gevent-websocket does not appear to be maintained anymore.
 """
 from socket import error
 from zlib import (
-    Z_SYNC_FLUSH,
+    Z_FULL_FLUSH,
 )
 
 from geventwebsocket.exceptions import (
@@ -36,7 +36,11 @@ def send_frame(websocket, message, opcode, compressor=None):
     # Start patched lines
     if compressor:
         message = compressor.compress(message)
-        message += compressor.flush(Z_SYNC_FLUSH)
+        # We use Z_FULL_FLUSH (rather than Z_SYNC_FLUSH) here when
+        # server_no_context_takeover has been passed, to reset the context at
+        # the end of every frame.  Patches to the actual gevent-websocket
+        # library should probably be able to support both.
+        message += compressor.flush(Z_FULL_FLUSH)
         # See https://tools.ietf.org/html/rfc7692#page-19
         if message.endswith('\x00\x00\xff\xff'):
             message = message[:-4]
