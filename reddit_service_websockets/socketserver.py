@@ -2,6 +2,7 @@ import logging
 import urlparse
 from zlib import (
     compressobj,
+    decompressobj,
     DEFLATED,
     MAX_WBITS,
 )
@@ -12,10 +13,26 @@ import geventwebsocket.handler
 
 from baseplate.crypto import MessageSigner, SignatureError
 
+from .patched_websocket import receive as websocket_receive
 from .patched_websocket import send as websocket_send
 
 
 LOG = logging.getLogger(__name__)
+
+
+# See http://www.zlib.net/manual.html#Advanced for details:
+#
+#     "windowBits can also be -8..-15 for raw deflate"
+#
+# Also see http://stackoverflow.com/a/22311297/720638
+#
+# We use a single global compressor to save on memory overhead, at the expense
+# of compression efficiency (since we cannot maintain a per-connection context
+# window).
+
+COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
+
+DECOMPRESSOR = decompressobj(-MAX_WBITS)
 
 
 class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
@@ -87,10 +104,21 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
     def start_response(self, status, headers, exc_info=None):
         # Ideally, this would probably go in `upgrade_connection`, but we have
         # no way to modify the headers there without duplicating the logic of
-        # the entire method.  This is a much smaller, cleaner entry point.
+        # the entire method.  This is a much smaller entry point.
         # Ideally, geventwebsocket would just support this stuff.
+
         if self.environ["supports_compression"]:
-            headers.append(("Sec-WebSocket-Extensions", "permessage-deflate"))
+
+            # {client,server}_no_context_takeover prevents compression context
+            # from being used across frames.  This is necessary so that we
+            # don't have to maintain a separate compressor for every connection
+            # that's made, which would be a large memory footprint.  This also
+            # lets us compress a message once and send to all clients, saving
+            # on CPU electrons.
+            headers.append(("Sec-WebSocket-Extensions",
+                            "permessage-deflate; server_no_context_takeover; "
+                            "client_no_context_takeover"))
+
         return super(WebSocketHandler, self).start_response(
             status, headers, exc_info=exc_info)
 
@@ -117,30 +145,26 @@ class SocketServer(object):
             start_response("400 Bad Request", [])
             return ["you are not a websocket"]
 
-        # Setup compression
-        if environ["supports_compression"]:
-            # See http://www.zlib.net/manual.html#Advanced for details:
-            #
-            #     "windowBits can also be -8..-15 for raw deflate"
-            #
-            # Also see http://stackoverflow.com/a/22311297/720638
-            compressor = compressobj(7, DEFLATED, -MAX_WBITS)
-        else:
-            compressor = None
-
         # ensure the application was properly configured to use the custom
         # handler subclass which validates namespace signatures
         assert environ["signature_validated"]
 
         namespace = environ["PATH_INFO"]
-        dispatcher = gevent.spawn(
-            self._pump_dispatcher, namespace, websocket, compressor)
+
+        # Setup compression
+        compressor = COMPRESSOR if environ["supports_compression"] else None
+        decompressor = DECOMPRESSOR \
+            if environ["supports_compression"] else None
+
+        dispatcher = gevent.spawn(self._pump_dispatcher, namespace, websocket,
+                                  compressor=compressor)
 
         try:
             self.metrics.counter("conn.connected").increment()
             self._send_message("connect", {"namespace": namespace})
             while True:
-                message = websocket.receive()
+                message = websocket_receive(
+                    websocket, decompressor=decompressor)
                 if message is None:
                     break
         except geventwebsocket.WebSocketError as e:
