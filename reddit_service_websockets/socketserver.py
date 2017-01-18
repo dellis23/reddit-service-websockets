@@ -74,7 +74,7 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
 
         # Check if compression is supported.  The RFC explanation for the
         # variations on what is accepted here is convoluted, so we'll just
-        # stick with the happy case, ignoring arguments to the :
+        # stick with the happy case:
         #
         #    https://tools.ietf.org/html/rfc6455#page-48
         #
