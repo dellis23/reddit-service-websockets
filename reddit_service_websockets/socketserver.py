@@ -58,11 +58,13 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
 
         try:
             namespace = self.environ["PATH_INFO"]
+            LOG.debug('PATH_INFO: %r', namespace)
             query_string = self.environ["QUERY_STRING"]
             params = urlparse.parse_qs(query_string, strict_parsing=True)
             signature = params["m"][0]
             app.signer.validate_signature(namespace, signature)
         except (KeyError, IndexError, ValueError, SignatureError):
+            LOG.exception('uh oh')
             app.metrics.counter("conn.rejected.bad_namespace").increment()
             self.start_response("403 Forbidden", [])
             return ["Forbidden"]
@@ -77,6 +79,7 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
         #
         # Worst case scenario, we fall back to not compressing.
         extensions = self.environ.get('HTTP_SEC_WEBSOCKET_EXTENSIONS')
+        LOG.debug('HTTP_SEC_WEBSOCKET_EXTENSIONS received: %r', extensions)
         extensions = {extension.split(";")[0].strip()
                       for extension in extensions.split(",")}
         self.environ["supports_compression"] = \
@@ -111,6 +114,7 @@ class SocketServer(object):
         self.metrics = metrics
         self.dispatcher = dispatcher
         self.signer = MessageSigner(mac_secret)
+        LOG.debug("initializing signer with secret %r", mac_secret)
         self.ping_interval = ping_interval
         self.status_publisher = None
 
@@ -160,10 +164,14 @@ class SocketServer(object):
     def _pump_dispatcher(self, namespace, websocket, supports_compression):
         for msg in self.dispatcher.listen(
                 namespace, max_timeout=self.ping_interval):
+            LOG.debug("pumped msg %r for namespace %r and websocket %r",
+                      msg, namespace, websocket)
             if msg is not None:
                 if supports_compression:
+                    LOG.debug('Sending compressed message: %r', msg.compressed)
                     send_raw_frame(websocket, msg.compressed)
                 else:
+                    LOG.debug('Sending raw message: %r', msg.raw)
                     websocket.send(msg.raw)
             else:
                 websocket.send_frame("", websocket.OPCODE_PING)

@@ -1,4 +1,5 @@
 from collections import namedtuple
+import logging
 import posixpath
 import random
 from zlib import (
@@ -11,6 +12,9 @@ import gevent
 import gevent.queue
 
 from .patched_websocket import make_compressed_frame
+
+
+LOG = logging.getLogger(__name__)
 
 
 # See http://www.zlib.net/manual.html#Advanced for details:
@@ -44,14 +48,20 @@ class MessageDispatcher(object):
         self.metrics = metrics
 
     def on_message_received(self, namespace, message):
+        LOG.debug('message received! namespace: %r, message: %r',
+                  namespace, message)
         consumers = self.consumers.get(namespace, [])
+        LOG.debug('consumers: %r, consumers', consumers)
 
         # Compress the message
         compressed = make_compressed_frame(message, COMPRESSOR)
         message = Message(compressed=compressed, raw=message)
+        LOG.debug('Prepared message: %r', message)
 
         with self.metrics.timer("dispatch"):
             for consumer in consumers:
+                LOG.debug('sending consumer: %r message: %r',
+                          consumer, message)
                 consumer.put(message)
 
     def listen(self, namespace, max_timeout):
@@ -68,6 +78,7 @@ class MessageDispatcher(object):
 
         namespace = namespace.rstrip("/")
         for ns in _walk_namespace_hierarchy(namespace):
+            LOG.debug('appending consumers for namespace %r', ns)
             self.consumers.setdefault(ns, []).append(queue)
 
         try:
