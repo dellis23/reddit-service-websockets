@@ -1,8 +1,32 @@
+from collections import namedtuple
 import posixpath
 import random
+from zlib import (
+    compressobj,
+    DEFLATED,
+    MAX_WBITS,
+)
 
 import gevent
 import gevent.queue
+
+from .patched_websocket import make_compressed_frame
+
+
+# See http://www.zlib.net/manual.html#Advanced for details:
+#
+#     "windowBits can also be -8..-15 for raw deflate"
+#
+# Also see http://stackoverflow.com/a/22311297/720638
+#
+# We use a single global compressor to save on memory overhead, at the expense
+# of compression efficiency (since we cannot maintain a per-connection context
+# window).
+
+COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
+
+
+Message = namedtuple('Message', ['compressed', 'raw'])
 
 
 def _walk_namespace_hierarchy(namespace):
@@ -21,6 +45,10 @@ class MessageDispatcher(object):
 
     def on_message_received(self, namespace, message):
         consumers = self.consumers.get(namespace, [])
+
+        # Compress the message
+        compressed = make_compressed_frame(message, COMPRESSOR)
+        message = Message(compressed, message)
 
         with self.metrics.timer("dispatch"):
             for consumer in consumers:

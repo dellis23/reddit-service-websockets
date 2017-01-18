@@ -1,9 +1,7 @@
 import logging
 import urlparse
 from zlib import (
-    compressobj,
     decompressobj,
-    DEFLATED,
     MAX_WBITS,
 )
 
@@ -14,23 +12,11 @@ import geventwebsocket.handler
 from baseplate.crypto import MessageSigner, SignatureError
 
 from .patched_websocket import receive as websocket_receive
-from .patched_websocket import send as websocket_send
+from .patched_websocket import send_raw_frame
 
 
 LOG = logging.getLogger(__name__)
 
-
-# See http://www.zlib.net/manual.html#Advanced for details:
-#
-#     "windowBits can also be -8..-15 for raw deflate"
-#
-# Also see http://stackoverflow.com/a/22311297/720638
-#
-# We use a single global compressor to save on memory overhead, at the expense
-# of compression efficiency (since we cannot maintain a per-connection context
-# window).
-
-COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
 
 DECOMPRESSOR = decompressobj(-MAX_WBITS)
 
@@ -152,12 +138,12 @@ class SocketServer(object):
         namespace = environ["PATH_INFO"]
 
         # Setup compression
-        compressor = COMPRESSOR if environ["supports_compression"] else None
         decompressor = DECOMPRESSOR \
             if environ["supports_compression"] else None
 
-        dispatcher = gevent.spawn(self._pump_dispatcher, namespace, websocket,
-                                  compressor=compressor)
+        dispatcher = gevent.spawn(
+            self._pump_dispatcher, namespace, websocket,
+            supports_compression=environ["supports_compression"])
 
         try:
             self.metrics.counter("conn.connected").increment()
@@ -178,10 +164,13 @@ class SocketServer(object):
         if self.status_publisher:
             self.status_publisher("websocket.%s" % key, value)
 
-    def _pump_dispatcher(self, namespace, websocket, compressor=None):
+    def _pump_dispatcher(self, namespace, websocket, supports_compression):
         for msg in self.dispatcher.listen(
                 namespace, max_timeout=self.ping_interval):
             if msg is not None:
-                websocket_send(websocket, msg, compressor=compressor)
+                if supports_compression:
+                    send_raw_frame(websocket, msg.compressed)
+                else:
+                    websocket.send(msg.raw)
             else:
                 websocket.send_frame("", websocket.OPCODE_PING)

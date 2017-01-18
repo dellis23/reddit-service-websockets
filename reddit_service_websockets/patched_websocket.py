@@ -16,61 +16,60 @@ from geventwebsocket.websocket import (
     MSG_CLOSED,
     MSG_SOCKET_DEAD,
     Header,
+    WebSocket,
 )
 
 
-def send_frame(websocket, message, opcode, compressor=None):
-    # Patched `send_frame` method that supports compression.  `compressor`
-    # should be a zlib compressor object.  Patched lines are commented
-    # accordingly.
+def _encode_bytes(text):
+    if isinstance(text, str):
+        return text
 
-    if websocket.closed:
-        websocket.current_app.on_close(MSG_ALREADY_CLOSED)
-        raise WebSocketError(MSG_ALREADY_CLOSED)
+    if not isinstance(text, unicode):
+        text = unicode(text or '')
 
-    if opcode == websocket.OPCODE_TEXT:
-        message = websocket._encode_bytes(message)
-    elif opcode == websocket.OPCODE_BINARY:
+    return text.encode('utf-8')
+
+
+def make_compressed_frame(message, compressor):
+    """
+    Generates header and a compressed message which can then be used on any
+    websocket connection where `no_context_takeover` has been negotiated.
+    This prevents the need to re-compress a broadcast-style message for every
+    websocket connection.
+
+    `compressor` is a zlib compressor object.
+    """
+    binary = not isinstance(message, (str, unicode))
+    opcode = WebSocket.OPCODE_BINARY if binary else WebSocket.OPCODE_TEXT
+    if binary:
         message = str(message)
-
-    # Start patched lines
-    if compressor:
-        message = compressor.compress(message)
-        # We use Z_FULL_FLUSH (rather than Z_SYNC_FLUSH) here when
-        # server_no_context_takeover has been passed, to reset the context at
-        # the end of every frame.  Patches to the actual gevent-websocket
-        # library should probably be able to support both.
-        message += compressor.flush(Z_FULL_FLUSH)
-        # See https://tools.ietf.org/html/rfc7692#page-19
-        if message.endswith('\x00\x00\xff\xff'):
-            message = message[:-4]
-        flags = Header.RSV0_MASK
     else:
-        flags = 0
-    header = Header.encode_header(True, opcode, '', len(message), flags)
-    # End patched lines
+        message = _encode_bytes(message)
+    message = compressor.compress(message)
+    # We use Z_FULL_FLUSH (rather than Z_SYNC_FLUSH) here when
+    # server_no_context_takeover has been passed, to reset the context at
+    # the end of every frame.  Patches to the actual gevent-websocket
+    # library should probably be able to support both.
+    message += compressor.flush(Z_FULL_FLUSH)
+    # See https://tools.ietf.org/html/rfc7692#page-19
+    if message.endswith('\x00\x00\xff\xff'):
+        message = message[:-4]
 
+    # Generate header.  The RSV0 bit indicates the payload is compressed.
+    flags = Header.RSV0_MASK
+    header = Header.encode_header(
+        fin=True, opcode=opcode, mask='', length=len(message), flags=flags)
+
+    return header + message
+
+
+def send_raw_frame(websocket, raw_message):
+    """
+    `raw_message` includes both the header and the encoded message.
+    """
     try:
-        websocket.raw_write(header + message)
+        websocket.raw_write(raw_message)
     except error:
-        raise WebSocketError("Socket is dead")
-
-
-def send(websocket, message, binary=None, compressor=None):
-    # Patched `send` method that supports compression.
-
-    if binary is None:
-        binary = not isinstance(message, (str, unicode))
-
-    opcode = websocket.OPCODE_BINARY if binary else websocket.OPCODE_TEXT
-
-    try:
-
-        # Start patched lines
-        send_frame(websocket, message, opcode, compressor=compressor)
-        # End patched lines
-
-    except WebSocketError:
         websocket.current_app.on_close(MSG_SOCKET_DEAD)
         raise WebSocketError(MSG_SOCKET_DEAD)
 
