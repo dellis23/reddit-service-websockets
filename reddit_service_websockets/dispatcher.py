@@ -48,7 +48,7 @@ class MessageDispatcher(object):
 
         # Compress the message
         compressed = make_compressed_frame(message, COMPRESSOR)
-        message = Message(compressed, message)
+        message = Message(compressed=compressed, raw=message)
 
         with self.metrics.timer("dispatch"):
             for consumer in consumers:
