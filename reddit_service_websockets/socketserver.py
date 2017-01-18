@@ -1,24 +1,21 @@
 import logging
 import urlparse
-from zlib import (
-    decompressobj,
-    MAX_WBITS,
-)
 
 import gevent
 import geventwebsocket
 import geventwebsocket.handler
+from geventwebsocket.websocket import WebSocket
 
 from baseplate.crypto import MessageSigner, SignatureError
 
-from .patched_websocket import receive as websocket_receive
+from .patched_websocket import read_frame as patched_read_frame
 from .patched_websocket import send_raw_frame
 
 
 LOG = logging.getLogger(__name__)
 
 
-DECOMPRESSOR = decompressobj(-MAX_WBITS)
+WebSocket.read_frame = patched_read_frame
 
 
 class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
@@ -137,10 +134,6 @@ class SocketServer(object):
 
         namespace = environ["PATH_INFO"]
 
-        # Setup compression
-        decompressor = DECOMPRESSOR \
-            if environ["supports_compression"] else None
-
         dispatcher = gevent.spawn(
             self._pump_dispatcher, namespace, websocket,
             supports_compression=environ["supports_compression"])
@@ -149,8 +142,8 @@ class SocketServer(object):
             self.metrics.counter("conn.connected").increment()
             self._send_message("connect", {"namespace": namespace})
             while True:
-                message = websocket_receive(
-                    websocket, decompressor=decompressor)
+                message = websocket.receive()
+                LOG.debug('message received: %r', message)
                 if message is None:
                     break
         except geventwebsocket.WebSocketError as e:

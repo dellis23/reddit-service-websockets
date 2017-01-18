@@ -4,6 +4,8 @@ since gevent-websocket does not appear to be maintained anymore.
 """
 from socket import error
 from zlib import (
+    decompressobj,
+    MAX_WBITS,
     Z_FULL_FLUSH,
 )
 
@@ -18,6 +20,9 @@ from geventwebsocket.websocket import (
     Header,
     WebSocket,
 )
+
+
+DECOMPRESSOR = decompressobj(-MAX_WBITS)
 
 
 def _encode_bytes(text):
@@ -74,13 +79,13 @@ def send_raw_frame(websocket, raw_message):
         raise WebSocketError(MSG_SOCKET_DEAD)
 
 
-def read_frame(websocket, decompressor=None):
+def read_frame(websocket):
     # Patched `read_frame` method that supports decompression
 
     header = Header.decode_header(websocket.stream)
 
     # Start patched lines
-    compressed = decompressor and (header.flags & header.RSV0_MASK)
+    compressed = header.flags & header.RSV0_MASK
     if compressed:
         header.flags &= ~header.RSV0_MASK
     # End patched lines
@@ -110,87 +115,10 @@ def read_frame(websocket, decompressor=None):
     # Start patched lines
     if compressed:
         payload = ''.join((
-            decompressor.decompress(payload),
-            decompressor.decompress('\0\0\xff\xff'),
-            decompressor.flush(),
+            DECOMPRESSOR.decompress(payload),
+            DECOMPRESSOR.decompress('\0\0\xff\xff'),
+            DECOMPRESSOR.flush(),
         ))
     # End patched lines
 
     return header, payload
-
-
-def read_message(websocket, decompressor=None):
-    opcode = None
-    message = ""
-
-    while True:
-        header, payload = read_frame(websocket, decompressor=decompressor)
-        f_opcode = header.opcode
-
-        if f_opcode in (websocket.OPCODE_TEXT, websocket.OPCODE_BINARY):
-            # a new frame
-            if opcode:
-                raise ProtocolError("The opcode in non-fin frame is "
-                                    "expected to be zero, got "
-                                    "{0!r}".format(f_opcode))
-
-            # Start reading a new message, reset the validator
-            websocket.utf8validator.reset()
-            websocket.utf8validate_last = (True, True, 0, 0)
-
-            opcode = f_opcode
-
-        elif f_opcode == websocket.OPCODE_CONTINUATION:
-            if not opcode:
-                raise ProtocolError("Unexpected frame with opcode=0")
-
-        elif f_opcode == websocket.OPCODE_PING:
-            websocket.handle_ping(header, payload)
-            continue
-
-        elif f_opcode == websocket.OPCODE_PONG:
-            websocket.handle_pong(header, payload)
-            continue
-
-        elif f_opcode == websocket.OPCODE_CLOSE:
-            websocket.handle_close(header, payload)
-            return
-
-        else:
-            raise ProtocolError("Unexpected opcode={0!r}".format(f_opcode))
-
-        if opcode == websocket.OPCODE_TEXT:
-            websocket.validate_utf8(payload)
-
-        message += payload
-
-        if header.fin:
-            break
-
-    if opcode == websocket.OPCODE_TEXT:
-        websocket.validate_utf8(message)
-        return message
-    else:
-        return bytearray(message)
-
-
-def receive(websocket, decompressor=None):
-
-    if websocket.closed:
-        websocket.current_app.on_close(MSG_ALREADY_CLOSED)
-        raise WebSocketError(MSG_ALREADY_CLOSED)
-
-    try:
-        return read_message(websocket, decompressor=decompressor)
-    except UnicodeError:
-        websocket.logger.debug("exception UnicodeError")
-        websocket.close(1007)
-    except ProtocolError as e:
-        websocket.logger.debug("exception ProtocolError %r", e)
-        websocket.close(1002)
-    except error:
-        websocket.logger.debug("exception socket.error")
-        websocket.close()
-        websocket.current_app.on_close(MSG_CLOSED)
-
-    return None
