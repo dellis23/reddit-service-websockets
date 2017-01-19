@@ -61,6 +61,10 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
             return ["Forbidden"]
 
         self.environ["signature_validated"] = True
+
+        LOG.info('Sec-WebSocket-Extensions Headers: %r',
+                 self.headers.get('Sec-WebSocket-Extensions'))
+
         return super(WebSocketHandler, self).upgrade_connection()
 
 
