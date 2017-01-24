@@ -37,6 +37,8 @@ def _encode_bytes(text):
 
 def make_compressed_frame(message, compressor):
     """
+    Make a compressed websocket frame from a message and compressor.
+
     Generates header and a compressed message which can then be used on any
     websocket connection where `no_context_takeover` has been negotiated.
     This prevents the need to re-compress a broadcast-style message for every
