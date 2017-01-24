@@ -179,8 +179,7 @@ class SocketServer(object):
             self.status_publisher("websocket.%s" % key, value)
 
     def _pump_dispatcher(self, namespace, websocket, supports_compression):
-        for msg in self.dispatcher.listen(
-                namespace, max_timeout=self.ping_interval):
+        for msg in self.dispatcher.listen(namespace, max_timeout=self.ping_interval):
             LOG.debug("pumped msg %r for namespace %r and websocket %r",
                       msg, namespace, websocket)
             if msg is not None:
