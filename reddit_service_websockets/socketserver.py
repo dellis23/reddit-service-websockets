@@ -18,6 +18,19 @@ LOG = logging.getLogger(__name__)
 WebSocket.read_frame = patched_read_frame
 
 
+def send_metrics_histogram(metrics_client, name, value):
+    """
+    Counters won't give us percentile information, so we abuse timers
+    instead.
+    """
+    timer_name = b".".join(node.strip(b".") for node in (
+        metrics_client.namespace,
+        name.encode("ascii")
+    ))
+    serialized = timer_name + ":{:g}|ms".format(value).encode()
+    metrics_client.transport.send(serialized)
+
+
 class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
     def read_request(self, raw_requestline):
         retval = super(WebSocketHandler, self).read_request(raw_requestline)
@@ -104,6 +117,10 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
             headers.append(("Sec-WebSocket-Extensions",
                             "permessage-deflate; server_no_context_takeover; "
                             "client_no_context_takeover"))
+            self.application.metrics.counter(
+                "compression.permessage-deflate").increment()
+        else:
+            self.application.metrics.counter("compression.none").increment()
 
         return super(WebSocketHandler, self).start_response(
             status, headers, exc_info=exc_info)
@@ -169,6 +186,16 @@ class SocketServer(object):
             if msg is not None:
                 if supports_compression:
                     LOG.debug('Sending compressed message: %r', msg.compressed)
+
+                    # Compressed size can actually go *above* original size
+                    # because of compression headers.  In this case, the
+                    # percentage will come out negative, which is not a valid
+                    # value for timers per the statsd spec.
+                    send_metrics_histogram(
+                        self.metrics,
+                        "message.percent_compressed",
+                        max(msg.percent_compressed, 0))
+
                     send_raw_frame(websocket, msg.compressed)
                 else:
                     LOG.debug('Sending raw message: %r', msg.raw)
