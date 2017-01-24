@@ -14,8 +14,6 @@ from geventwebsocket.exceptions import (
     WebSocketError,
 )
 from geventwebsocket.websocket import (
-    MSG_ALREADY_CLOSED,
-    MSG_CLOSED,
     MSG_SOCKET_DEAD,
     Header,
     WebSocket,
