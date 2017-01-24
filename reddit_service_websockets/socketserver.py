@@ -19,10 +19,8 @@ WebSocket.read_frame = patched_read_frame
 
 
 def send_metrics_histogram(metrics_client, name, value):
-    """
-    Counters won't give us percentile information, so we abuse timers
-    instead.
-    """
+    # Counters won't give us percentile information, so we abuse timers
+    # instead.
     timer_name = b".".join(node.strip(b".") for node in (
         metrics_client.namespace,
         name.encode("ascii")
