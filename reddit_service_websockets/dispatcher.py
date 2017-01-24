@@ -26,7 +26,7 @@ from .patched_websocket import make_compressed_frame
 COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
 
 
-Message = namedtuple('Message', ['compressed', 'raw'])
+Message = namedtuple('Message', ['compressed', 'raw', 'percent_compressed'])
 
 
 def _walk_namespace_hierarchy(namespace):
@@ -48,7 +48,11 @@ class MessageDispatcher(object):
 
         # Compress the message
         compressed = make_compressed_frame(message, COMPRESSOR)
-        message = Message(compressed=compressed, raw=message)
+        message = Message(
+            compressed=compressed,
+            raw=message,
+            percent_compressed=1 - float(len(compressed))/float(len(message)),
+        )
 
         with self.metrics.timer("dispatch"):
             for consumer in consumers:
