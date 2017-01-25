@@ -56,6 +56,19 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
 
         app = self.application
 
+        # Check if compression is supported.  The RFC explanation for the
+        # variations on what is accepted here is convoluted, so we'll just
+        # stick with the happy case:
+        #
+        #    https://tools.ietf.org/html/rfc6455#page-48
+        #
+        # Worst case scenario, we fall back to not compressing.
+        extensions = self.environ.get('HTTP_SEC_WEBSOCKET_EXTENSIONS', '')
+        extensions = {extension.split(";")[0].strip()
+                      for extension in extensions.split(",")}
+        self.environ["supports_compression"] = \
+            "permessage-deflate" in extensions
+
         try:
             namespace = self.environ["PATH_INFO"]
             LOG.debug('PATH_INFO: %r', namespace)
@@ -71,24 +84,11 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
 
         self.environ["signature_validated"] = True
 
-        # Check if compression is supported.  The RFC explanation for the
-        # variations on what is accepted here is convoluted, so we'll just
-        # stick with the happy case:
-        #
-        #    https://tools.ietf.org/html/rfc6455#page-48
-        #
-        # Worst case scenario, we fall back to not compressing.
-        extensions = self.environ.get('HTTP_SEC_WEBSOCKET_EXTENSIONS')
         LOG.debug('HTTP_SEC_WEBSOCKET_EXTENSIONS received: %r', extensions)
-        extensions = {extension.split(";")[0].strip()
-                      for extension in extensions.split(",")}
-        self.environ["supports_compression"] = \
-            "permessage-deflate" in extensions
-
         return super(WebSocketHandler, self).upgrade_connection()
 
     def start_response(self, status, headers, exc_info=None):
-        if self.environ["supports_compression"]:
+        if self.environ.get("supports_compression"):
 
             # {client,server}_no_context_takeover prevents compression context
             # from being used across frames.  This is necessary so that we
@@ -139,7 +139,7 @@ class SocketServer(object):
 
         dispatcher = gevent.spawn(
             self._pump_dispatcher, namespace, websocket,
-            supports_compression=environ["supports_compression"])
+            supports_compression=environ.get("supports_compression"))
 
         try:
             self.metrics.counter("conn.connected").increment()
