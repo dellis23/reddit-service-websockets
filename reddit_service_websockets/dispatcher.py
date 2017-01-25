@@ -62,8 +62,10 @@ class MessageDispatcher(object):
         consumers = self.consumers.get(namespace, [])
 
         # Compress the message
-        compressed = make_compressed_frame(message, COMPRESSOR) \
-            if len(message) >= MIN_COMPRESS_SIZE else None
+        if len(message) >= MIN_COMPRESS_SIZE:
+            compressed = make_compressed_frame(message, COMPRESSOR)
+        else:
+            compressed = None
         message = Message(
             compressed=compressed,
             raw=message,
