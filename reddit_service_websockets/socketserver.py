@@ -88,11 +88,6 @@ class WebSocketHandler(geventwebsocket.handler.WebSocketHandler):
         return super(WebSocketHandler, self).upgrade_connection()
 
     def start_response(self, status, headers, exc_info=None):
-        # Ideally, this would probably go in `upgrade_connection`, but we have
-        # no way to modify the headers there without duplicating the logic of
-        # the entire method.  This is a much smaller entry point.
-        # Ideally, geventwebsocket would just support this stuff.
-
         if self.environ["supports_compression"]:
 
             # {client,server}_no_context_takeover prevents compression context
