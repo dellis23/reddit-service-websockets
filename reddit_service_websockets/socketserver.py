@@ -181,7 +181,7 @@ class SocketServer(object):
             LOG.debug("pumped msg %r for namespace %r and websocket %r",
                       msg, namespace, websocket)
             if msg is not None:
-                if supports_compression:
+                if supports_compression and msg.compressed is not None:
                     LOG.debug('Sending compressed message: %r', msg.compressed)
 
                     # Compressed size can actually go *above* original size
