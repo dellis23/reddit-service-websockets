@@ -69,8 +69,10 @@ class MessageDispatcher(object):
         LOG.debug('consumers: %r, consumers', consumers)
 
         # Compress the message
-        compressed = make_compressed_frame(message, COMPRESSOR) \
-            if len(message) >= MIN_COMPRESS_SIZE else None
+        if len(message) >= MIN_COMPRESS_SIZE:
+            compressed = make_compressed_frame(message, COMPRESSOR)
+        else:
+            compressed = None
         message = Message(
             compressed=compressed,
             raw=message,
