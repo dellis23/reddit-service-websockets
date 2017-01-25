@@ -45,7 +45,7 @@ COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
 MIN_COMPRESS_SIZE = 1500 - 60 - 60
 
 
-Message = namedtuple('Message', ['compressed', 'raw', 'percent_compressed'])
+Message = namedtuple('Message', ['compressed', 'raw'])
 
 
 def _walk_namespace_hierarchy(namespace):
@@ -73,12 +73,7 @@ class MessageDispatcher(object):
             compressed = make_compressed_frame(message, COMPRESSOR)
         else:
             compressed = None
-        message = Message(
-            compressed=compressed,
-            raw=message,
-            percent_compressed=(1 - float(len(compressed))/float(len(message)))
-                                if compressed is not None else 0,
-        )
+        message = Message(compressed=compressed, raw=message)
         LOG.debug('Prepared message: %r', message)
 
         with self.metrics.timer("dispatch"):
