@@ -26,6 +26,21 @@ from .patched_websocket import make_compressed_frame
 COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
 
 
+# We don't bother compressing if the message would already fit into a single
+# packet (i.e. if the length of the message including IP and TCP headers is
+# less than the Maximum Transmission Unit).
+#
+# According to this, the MTU of a packet includes IP and TCP but not ethernet
+# headers:
+#
+#     http://stackoverflow.com/a/9151421/720638
+#
+# 1440 - common MTU size
+# 60 - TCP max header size
+# 60 - IP max header size
+MIN_COMPRESS_SIZE = 1400 - 60 - 60
+
+
 Message = namedtuple('Message', ['compressed', 'raw', 'percent_compressed'])
 
 
@@ -47,11 +62,13 @@ class MessageDispatcher(object):
         consumers = self.consumers.get(namespace, [])
 
         # Compress the message
-        compressed = make_compressed_frame(message, COMPRESSOR)
+        compressed = make_compressed_frame(message, COMPRESSOR) \
+            if len(message) >= MIN_COMPRESS_SIZE else None
         message = Message(
             compressed=compressed,
             raw=message,
-            percent_compressed=1 - float(len(compressed))/float(len(message)),
+            percent_compressed=(1 - float(len(compressed))/float(len(message)))
+                                if compressed is not None else 0,
         )
 
         with self.metrics.timer("dispatch"):

@@ -175,7 +175,7 @@ class SocketServer(object):
     def _pump_dispatcher(self, namespace, websocket, supports_compression):
         for msg in self.dispatcher.listen(namespace, max_timeout=self.ping_interval):
             if msg is not None:
-                if supports_compression:
+                if supports_compression and msg.compressed is not None:
 
                     # Compressed size can actually go *above* original size
                     # because of compression headers.  In this case, the
