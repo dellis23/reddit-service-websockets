@@ -35,10 +35,10 @@ COMPRESSOR = compressobj(7, DEFLATED, -MAX_WBITS)
 #
 #     http://stackoverflow.com/a/9151421/720638
 #
-# 1440 - common MTU size
+# 1500 - common MTU size
 # 60 - TCP max header size
 # 60 - IP max header size
-MIN_COMPRESS_SIZE = 1400 - 60 - 60
+MIN_COMPRESS_SIZE = 1500 - 60 - 60
 
 
 Message = namedtuple('Message', ['compressed', 'raw', 'percent_compressed'])
